@@ -7,6 +7,8 @@ import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+import aiohttp
+
 from app.price_feed import PriceFeed
 from app.tradingview_feed import TradingViewFeed
 from app.signals import compute_full_analysis
@@ -28,8 +30,11 @@ app.add_middleware(
 
 # Global feeds - TradingView for real data, PriceFeed as fallback
 tv_feed = TradingViewFeed(symbol="XAUUSD")
-fallback_feed = PriceFeed(symbol="XAUUSD", base_price=3025.50)
+fallback_feed = PriceFeed(symbol="XAUUSD", base_price=4474.00)
 ai_engine = AIEngine()
+
+# Cache for scraped gold price
+_scraped_price_cache: dict = {"price": 0.0, "timestamp": 0.0}
 
 # Track connected WebSocket clients
 connected_clients: set[WebSocket] = set()
@@ -42,9 +47,46 @@ def get_active_feed():
     return fallback_feed
 
 
+async def _fetch_real_gold_price() -> float:
+    """Fetch real gold price from public APIs to calibrate simulation."""
+    urls = [
+        ("https://api.metals.live/v1/spot/gold", "gold_api"),
+        ("https://data-asg.goldprice.org/dbXRates/USD", "goldprice_org"),
+    ]
+    for url, source in urls:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if source == "gold_api" and isinstance(data, list) and data:
+                            price = float(data[0].get("price", 0))
+                            if price > 0:
+                                logger.info(f"Got real gold price from metals.live: ${price:.2f}")
+                                return price
+                        elif source == "goldprice_org" and isinstance(data, dict):
+                            items = data.get("items", [])
+                            if items:
+                                price = float(items[0].get("xauPrice", 0))
+                                if price > 0:
+                                    logger.info(f"Got real gold price from goldprice.org: ${price:.2f}")
+                                    return price
+        except Exception as e:
+            logger.debug(f"Price fetch from {source} failed: {e}")
+    return 0.0
+
+
 @app.on_event("startup")
 async def startup():
     """Start TradingView feed and AI engine on startup."""
+    # Try to get real gold price to calibrate simulation
+    real_price = await _fetch_real_gold_price()
+    if real_price > 0:
+        fallback_feed.recalibrate(real_price)
+        _scraped_price_cache["price"] = real_price
+        _scraped_price_cache["timestamp"] = time.time()
+        logger.info(f"Simulation calibrated to real gold price: ${real_price:.2f}")
+
     logger.info("Starting TradingView live feed...")
     await tv_feed.connect()
     logger.info("Starting AI engine...")
@@ -93,6 +135,41 @@ async def get_timeframe_analysis(timeframe: str):
     from app.signals import compute_timeframe_signal
     feed = get_active_feed()
     return compute_timeframe_signal(feed, timeframe)
+
+
+@app.get("/api/scraper/gold-price")
+async def scraper_gold_price():
+    """Get current gold price - compatibility endpoint.
+
+    Returns real-time gold price from the active feed.
+    Also periodically refreshes from external APIs to keep simulation calibrated.
+    """
+    now = time.time()
+    feed = get_active_feed()
+    tick = feed.tick()
+
+    # Periodically re-calibrate simulation with real price (every 60s)
+    if not tv_feed.is_connected and (now - _scraped_price_cache["timestamp"]) > 60:
+        real_price = await _fetch_real_gold_price()
+        if real_price > 0:
+            _scraped_price_cache["price"] = real_price
+            _scraped_price_cache["timestamp"] = now
+            # Gently nudge simulation toward real price
+            drift = (real_price - fallback_feed.current_price) * 0.1
+            fallback_feed.current_price += drift
+            fallback_feed.base_price = fallback_feed.current_price
+
+    return {
+        "price": tick["price"],
+        "bid": tick["bid"],
+        "ask": tick["ask"],
+        "high": tick["high"],
+        "low": tick["low"],
+        "change": tick["change"],
+        "change_pct": tick["change_pct"],
+        "source": "tradingview" if tv_feed.is_connected else "api_calibrated",
+        "timestamp": tick["timestamp"],
+    }
 
 
 @app.get("/api/price")
@@ -203,7 +280,10 @@ async def websocket_endpoint(websocket: WebSocket):
         decision["commentary"] = commentary
 
         analysis["ai_decision"] = decision
-        analysis["feed_source"] = "tradingview" if tv_feed.is_connected else "simulation"
+        feed_src = "tradingview" if tv_feed.is_connected else (
+            "api_calibrated" if _scraped_price_cache["price"] > 0 else "simulation"
+        )
+        analysis["feed_source"] = feed_src
 
         await websocket.send_json({"type": "full_analysis", "data": analysis})
 
@@ -255,7 +335,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 decision["commentary"] = commentary
 
             analysis["ai_decision"] = decision
-            analysis["feed_source"] = "tradingview" if tv_feed.is_connected else "simulation"
+            feed_src = "tradingview" if tv_feed.is_connected else (
+                "api_calibrated" if _scraped_price_cache["price"] > 0 else "simulation"
+            )
+            analysis["feed_source"] = feed_src
 
             await websocket.send_json({
                 "type": "update",

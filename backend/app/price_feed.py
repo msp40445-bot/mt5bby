@@ -50,6 +50,29 @@ class PriceFeed:
         # Initialize with historical data
         self._generate_historical_data()
 
+    def recalibrate(self, new_price: float):
+        """Recalibrate the feed to a new base price and regenerate history."""
+        self.base_price = new_price
+        self.current_price = new_price
+        self.open_price = new_price
+        self.bid = new_price - 0.15
+        self.ask = new_price + 0.15
+        self.high = new_price + 12.0
+        self.low = new_price - 8.0
+        # Clear and regenerate history at new price level
+        self.candles_1s.clear()
+        self.candles_5s.clear()
+        self.candles_10s.clear()
+        self.candles_30s.clear()
+        self.candles_1m.clear()
+        self.candles_5m.clear()
+        self.candles_15m.clear()
+        self.candles_1h.clear()
+        self.tick_history.clear()
+        self._current_candles.clear()
+        self._candle_start_times.clear()
+        self._generate_historical_data()
+
     def _generate_historical_data(self):
         """Generate realistic historical candle data for indicator warm-up."""
         now = time.time()
