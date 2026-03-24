@@ -69,6 +69,12 @@ export interface AIDecision {
   quality_color: string;
   strength: number;
   reasons: string[];
+  action_advice: string;
+  trailing_stop: number;
+  break_even_zone: boolean;
+  momentum_divergence: boolean;
+  bb_position: string;
+  bb_squeeze: boolean;
   commentary: string;
   timestamp: number;
   ai_powered: boolean;

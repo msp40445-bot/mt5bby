@@ -8,6 +8,7 @@ import { Watchlist } from './components/Watchlist';
 import { AIDecisionPanel } from './components/AIDecisionPanel';
 import { AdvancedAnalysisPanel } from './components/AdvancedAnalysisPanel';
 import { StatsPanel } from './components/StatsPanel';
+import { PnLSimulator } from './components/PnLSimulator';
 import { BarChart3, Zap, Brain, Activity } from 'lucide-react';
 
 function LoadingScreen() {
@@ -72,13 +73,14 @@ function App() {
           {/* Price Ticker */}
           <PriceTicker price={data.price} connected={connected} latency={latency} />
 
-          {/* AI Decision Panel + Stats */}
+          {/* AI Decision Panel + PnL Simulator + Stats */}
           {data.ai_decision && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-2 space-y-4">
                 <AIDecisionPanel decision={data.ai_decision} feedSource={feedSource} />
               </div>
-              <div>
+              <div className="space-y-4">
+                <PnLSimulator decision={data.ai_decision} price={data.price} />
                 <StatsPanel decision={data.ai_decision} />
               </div>
             </div>
