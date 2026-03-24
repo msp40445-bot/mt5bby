@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { BarChart3, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import type { AIDecision } from '../hooks/useWebSocket';
 
@@ -17,21 +17,23 @@ interface SignalRecord {
 
 export function StatsPanel({ decision }: StatsPanelProps) {
   const [history, setHistory] = useState<SignalRecord[]>([]);
-  const [lastRecorded, setLastRecorded] = useState(0);
+  const lastRecordedRef = useRef(0);
 
   // Record new signals (debounced by 10 seconds)
-  if (decision && decision.timestamp - lastRecorded > 10) {
-    const record: SignalRecord = {
-      direction: decision.direction,
-      entry: decision.entry,
-      take_profit: decision.take_profit,
-      stop_loss: decision.stop_loss,
-      confidence: decision.confidence,
-      timestamp: decision.timestamp,
-    };
-    setHistory(prev => [record, ...prev].slice(0, 50));
-    setLastRecorded(decision.timestamp);
-  }
+  useEffect(() => {
+    if (decision && decision.timestamp - lastRecordedRef.current > 10) {
+      const record: SignalRecord = {
+        direction: decision.direction,
+        entry: decision.entry,
+        take_profit: decision.take_profit,
+        stop_loss: decision.stop_loss,
+        confidence: decision.confidence,
+        timestamp: decision.timestamp,
+      };
+      setHistory(prev => [record, ...prev].slice(0, 50));
+      lastRecordedRef.current = decision.timestamp;
+    }
+  }, [decision]);
 
   const buyCount = history.filter(h => h.direction === 'BUY').length;
   const sellCount = history.filter(h => h.direction === 'SELL').length;
