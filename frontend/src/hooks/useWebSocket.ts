@@ -12,6 +12,7 @@ export interface PriceData {
   change_pct: number;
   volume: number;
   timestamp: number;
+  source?: string;
 }
 
 export interface IndicatorValue {
@@ -55,6 +56,79 @@ export interface MasterSignal {
   total_neutral: number;
 }
 
+export interface AIDecision {
+  direction: string;
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  risk_reward: number;
+  sim_profit: number;
+  sim_loss: number;
+  confidence: number;
+  quality: string;
+  quality_color: string;
+  strength: number;
+  reasons: string[];
+  commentary: string;
+  timestamp: number;
+  ai_powered: boolean;
+}
+
+export interface BollingerBands {
+  upper: number;
+  middle: number;
+  lower: number;
+  width: number;
+  percent_b: number;
+}
+
+export interface MarketStructure {
+  trend: string;
+  higher_highs: number;
+  lower_highs: number;
+  higher_lows: number;
+  lower_lows: number;
+  strength: number;
+}
+
+export interface Pattern {
+  name: string;
+  bias: string;
+  strength: number;
+}
+
+export interface TrendStrength {
+  strength: number;
+  direction: string;
+  slope: number;
+  ma_alignment: string;
+  description: string;
+}
+
+export interface FibonacciData {
+  swing_high: number;
+  swing_low: number;
+  levels: Record<string, number>;
+}
+
+export interface VolumeProfile {
+  poc: number;
+  value_area_high: number;
+  value_area_low: number;
+}
+
+export interface AdvancedAnalysis {
+  bollinger_bands?: BollingerBands;
+  atr?: { value: number; period: number };
+  obv?: { value: number; trend: string };
+  vwap?: { value: number; deviation: number; deviation_pct: number; signal: string };
+  fibonacci?: FibonacciData;
+  market_structure?: MarketStructure;
+  patterns?: Pattern[];
+  volume_profile?: VolumeProfile;
+  trend_strength?: TrendStrength;
+}
+
 export interface AnalysisData {
   price: PriceData;
   oscillators: IndicatorValue[];
@@ -65,6 +139,9 @@ export interface AnalysisData {
   overall_summary: GaugeSummary;
   timeframe_signals: TimeframeSignal[];
   master_signal: MasterSignal;
+  advanced?: AdvancedAnalysis;
+  ai_decision?: AIDecision;
+  feed_source?: string;
   timestamp: number;
 }
 
