@@ -1,6 +1,5 @@
 """AI Trading Decision Engine - uses local LLM for analysis and trade signals."""
 import asyncio
-import json
 import logging
 import os
 import subprocess
@@ -156,50 +155,36 @@ class AIEngine:
         if atr_value and atr_value > 0:
             sl_distance = atr_value * 1.5
             tp_distance = atr_value * 2.5
+            trailing_stop = atr_value * 1.0
         else:
             # Fallback: percentage-based
             sl_distance = price * 0.005  # 0.5%
             tp_distance = price * 0.01   # 1.0%
+            trailing_stop = price * 0.003
 
-        # Adjust based on Bollinger Bands position
+        # Bollinger Band position analysis
+        bb_position = "middle"
+        bb_squeeze = False
         if bb_data:
             bb_upper = bb_data.get("upper", price)
             bb_lower = bb_data.get("lower", price)
             bb_mid = bb_data.get("middle", price)
+            bb_width = bb_data.get("width", 0)
+            pct_b = bb_data.get("percent_b", 50)
 
             if price > bb_upper:
-                # Overbought - favor sell
+                bb_position = "above_upper"
                 strength = min(strength - 0.2, strength)
             elif price < bb_lower:
-                # Oversold - favor buy
+                bb_position = "below_lower"
                 strength = max(strength + 0.2, strength)
+            elif pct_b > 80:
+                bb_position = "near_upper"
+            elif pct_b < 20:
+                bb_position = "near_lower"
 
-        # Determine direction
-        if strength > 0.15:
-            direction = "BUY"
-            entry = price
-            sl = round(entry - sl_distance, 2)
-            tp = round(entry + tp_distance, 2)
-        elif strength < -0.15:
-            direction = "SELL"
-            entry = price
-            sl = round(entry + sl_distance, 2)
-            tp = round(entry - tp_distance, 2)
-        else:
-            direction = "HOLD"
-            entry = price
-            sl = round(entry - sl_distance, 2)
-            tp = round(entry + tp_distance, 2)
-
-        # Calculate risk/reward ratio
-        risk = abs(entry - sl)
-        reward = abs(tp - entry)
-        rr_ratio = round(reward / risk, 2) if risk > 0 else 0
-
-        # Simulated profit (1 lot)
-        lot_size = 100  # 1 standard lot = 100 oz for gold
-        sim_profit = round(reward * lot_size, 2)
-        sim_loss = round(-risk * lot_size, 2)
+            if bb_width < 1.0:
+                bb_squeeze = True
 
         # Confidence adjustment based on indicator agreement
         osc_signal = oscillator_summary.get("signal", "Neutral")
@@ -214,49 +199,161 @@ class AIEngine:
 
         agreement_pct = abs(signal_agreement) / 3 * 100
 
+        # Detect momentum divergence
+        momentum_diverging = False
+        if rsi_value is not None and macd_hist is not None:
+            if (rsi_value > 70 and macd_hist < 0) or (rsi_value < 30 and macd_hist > 0):
+                momentum_diverging = True
+
+        # Determine direction with more granular actions
+        if strength > 0.5 and agreement_pct > 60:
+            direction = "STRONG BUY"
+            entry = price
+            sl = round(entry - sl_distance, 2)
+            tp = round(entry + tp_distance, 2)
+        elif strength > 0.15:
+            direction = "BUY"
+            entry = price
+            sl = round(entry - sl_distance, 2)
+            tp = round(entry + tp_distance, 2)
+        elif strength < -0.5 and agreement_pct > 60:
+            direction = "STRONG SELL"
+            entry = price
+            sl = round(entry + sl_distance, 2)
+            tp = round(entry - tp_distance, 2)
+        elif strength < -0.15:
+            direction = "SELL"
+            entry = price
+            sl = round(entry + sl_distance, 2)
+            tp = round(entry - tp_distance, 2)
+        else:
+            direction = "HOLD"
+            entry = price
+            sl = round(entry - sl_distance, 2)
+            tp = round(entry + tp_distance, 2)
+
+        # Override to EXIT if momentum is diverging against the position
+        if momentum_diverging and abs(strength) < 0.3:
+            direction = "EXIT"
+
+        # Break-even zone detection
+        break_even_zone = False
+        if abs(strength) < 0.05 and agreement_pct < 40:
+            break_even_zone = True
+            if direction == "HOLD":
+                direction = "BREAK EVEN"
+
+        # Calculate risk/reward ratio
+        risk = abs(entry - sl)
+        reward = abs(tp - entry)
+        rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+
+        # Simulated profit (1 lot)
+        lot_size = 100  # 1 standard lot = 100 oz for gold
+        sim_profit = round(reward * lot_size, 2)
+        sim_loss = round(-risk * lot_size, 2)
+
         # Build reasoning
         reasons = []
+
+        # RSI analysis
         if rsi_value is not None:
-            if rsi_value < 30:
-                reasons.append(f"RSI oversold at {rsi_value:.1f}")
+            if rsi_value < 20:
+                reasons.append(f"RSI deeply oversold at {rsi_value:.1f} - strong bounce expected")
+            elif rsi_value < 30:
+                reasons.append(f"RSI oversold at {rsi_value:.1f} - watch for reversal")
+            elif rsi_value > 80:
+                reasons.append(f"RSI deeply overbought at {rsi_value:.1f} - pullback likely")
             elif rsi_value > 70:
-                reasons.append(f"RSI overbought at {rsi_value:.1f}")
+                reasons.append(f"RSI overbought at {rsi_value:.1f} - caution on longs")
+            elif 45 <= rsi_value <= 55:
+                reasons.append(f"RSI neutral at {rsi_value:.1f} - no momentum edge")
+            elif rsi_value > 55:
+                reasons.append(f"RSI bullish at {rsi_value:.1f} - momentum favors buyers")
             else:
-                reasons.append(f"RSI neutral at {rsi_value:.1f}")
+                reasons.append(f"RSI bearish at {rsi_value:.1f} - momentum favors sellers")
 
+        # MACD analysis
         if macd_hist is not None:
-            if macd_hist > 0:
-                reasons.append("MACD histogram positive (bullish)")
+            if macd_hist > 0 and macd_hist > 0.5:
+                reasons.append("MACD strongly bullish - upward momentum accelerating")
+            elif macd_hist > 0:
+                reasons.append("MACD histogram positive - mild bullish momentum")
+            elif macd_hist < -0.5:
+                reasons.append("MACD strongly bearish - downward momentum accelerating")
             else:
-                reasons.append("MACD histogram negative (bearish)")
+                reasons.append("MACD histogram negative - mild bearish pressure")
 
+        # Divergence warning
+        if momentum_diverging:
+            reasons.append("WARNING: RSI/MACD divergence detected - trend weakening")
+
+        # Bollinger Band analysis
         if bb_data:
-            if price > bb_data.get("upper", price):
-                reasons.append("Price above upper Bollinger Band")
-            elif price < bb_data.get("lower", price):
-                reasons.append("Price below lower Bollinger Band")
+            if bb_position == "above_upper":
+                reasons.append("Price above upper BB - overbought, expect mean reversion")
+            elif bb_position == "below_lower":
+                reasons.append("Price below lower BB - oversold, expect bounce")
+            elif bb_position == "near_upper":
+                reasons.append("Price near upper BB - approaching resistance")
+            elif bb_position == "near_lower":
+                reasons.append("Price near lower BB - approaching support")
+            if bb_squeeze:
+                reasons.append("BB Squeeze detected - breakout imminent, wait for direction")
 
+        # Market structure
         if market_structure:
             trend = market_structure.get("trend", "unknown")
-            reasons.append(f"Market structure: {trend}")
+            ms_strength = market_structure.get("strength", 0)
+            hh = market_structure.get("higher_highs", 0)
+            ll = market_structure.get("lower_lows", 0)
+            if trend == "Uptrend":
+                reasons.append(f"Market structure bullish ({hh} HH) - buy dips")
+            elif trend == "Downtrend":
+                reasons.append(f"Market structure bearish ({ll} LL) - sell rallies")
+            else:
+                reasons.append(f"Market ranging - trade boundaries, strength {ms_strength}%")
 
+        # Pattern analysis
         if patterns:
             for p in patterns[:3]:
-                reasons.append(f"Pattern: {p['name']} ({p['bias']})")
+                p_strength = p.get('strength', 50)
+                if p_strength >= 80:
+                    reasons.append(f"STRONG pattern: {p['name']} ({p['bias']}) - high reliability")
+                else:
+                    reasons.append(f"Pattern: {p['name']} ({p['bias']})")
 
-        reasons.append(f"Signal agreement: {agreement_pct:.0f}%")
+        reasons.append(f"Signal agreement: {agreement_pct:.0f}% across oscillators, MAs, master")
         reasons.append(f"Master signal: {action} ({confidence:.0f}% confidence)")
 
         # Determine signal quality
         if abs(strength) > 0.5 and agreement_pct > 60:
             quality = "HIGH"
             quality_color = "#22c55e"
+        elif abs(strength) > 0.3 and agreement_pct > 40:
+            quality = "GOOD"
+            quality_color = "#84cc16"
         elif abs(strength) > 0.15 and agreement_pct > 30:
             quality = "MEDIUM"
             quality_color = "#f59e0b"
-        else:
+        elif abs(strength) > 0.05:
             quality = "LOW"
+            quality_color = "#f97316"
+        else:
+            quality = "WAIT"
             quality_color = "#ef4444"
+
+        # Build action advice
+        if direction in ("BUY", "STRONG BUY"):
+            action_advice = f"Enter LONG at {entry:.2f}. Set SL at {sl:.2f}, TP at {tp:.2f}. Trail stop by {trailing_stop:.2f} as price moves in your favor."
+        elif direction in ("SELL", "STRONG SELL"):
+            action_advice = f"Enter SHORT at {entry:.2f}. Set SL at {sl:.2f}, TP at {tp:.2f}. Trail stop by {trailing_stop:.2f} as price moves in your favor."
+        elif direction == "EXIT":
+            action_advice = "Close open positions. Momentum divergence signals trend exhaustion. Re-evaluate after consolidation."
+        elif direction == "BREAK EVEN":
+            action_advice = "Move stops to break-even. Mixed signals - protect capital. No new entries until direction clears."
+        else:
+            action_advice = "No clear edge. Stay flat or tighten stops on existing positions. Wait for stronger signal alignment."
 
         return {
             "direction": direction,
@@ -271,6 +368,12 @@ class AIEngine:
             "quality_color": quality_color,
             "strength": round(strength, 4),
             "reasons": reasons,
+            "action_advice": action_advice,
+            "trailing_stop": round(trailing_stop, 2),
+            "break_even_zone": break_even_zone,
+            "momentum_divergence": momentum_diverging,
+            "bb_position": bb_position,
+            "bb_squeeze": bb_squeeze if bb_data else False,
             "timestamp": time.time(),
             "ai_powered": self._ready,
         }
@@ -290,6 +393,12 @@ class AIEngine:
             "quality_color": "#6b7280",
             "strength": 0,
             "reasons": ["Waiting for market data..."],
+            "action_advice": "Waiting for market data to initialize...",
+            "trailing_stop": 0,
+            "break_even_zone": False,
+            "momentum_divergence": False,
+            "bb_position": "unknown",
+            "bb_squeeze": False,
             "timestamp": time.time(),
             "ai_powered": False,
         }
@@ -320,24 +429,48 @@ Give a brief trading analysis.</s>
         symbol = price_data.get("symbol", "XAUUSD")
         price = price_data.get("price", 0)
         confidence = decision["confidence"]
+        quality = decision.get("quality", "LOW")
+        rr = decision.get("risk_reward", 0)
+        trailing = decision.get("trailing_stop", 0)
 
-        if direction == "BUY":
+        if direction in ("BUY", "STRONG BUY"):
+            urgency = "STRONG " if direction == "STRONG BUY" else ""
             return (
-                f"{symbol} showing bullish momentum at {price}. "
-                f"Technical indicators favor long entry with {confidence:.0f}% confidence. "
-                f"Target {decision['take_profit']} with stop at {decision['stop_loss']}."
+                f"{urgency}BUY SIGNAL on {symbol} at {price:.2f}. "
+                f"Entry: {decision['entry']:.2f} | TP: {decision['take_profit']:.2f} | SL: {decision['stop_loss']:.2f}. "
+                f"Risk/Reward {rr}:1 with {confidence:.0f}% confidence ({quality} quality). "
+                f"Trail your stop by {trailing:.2f} as price moves up. "
+                f"Look to take partial profits at 50% of TP distance."
             )
-        elif direction == "SELL":
+        elif direction in ("SELL", "STRONG SELL"):
+            urgency = "STRONG " if direction == "STRONG SELL" else ""
             return (
-                f"{symbol} showing bearish pressure at {price}. "
-                f"Indicators suggest short opportunity with {confidence:.0f}% confidence. "
-                f"Target {decision['take_profit']} with stop at {decision['stop_loss']}."
+                f"{urgency}SELL SIGNAL on {symbol} at {price:.2f}. "
+                f"Entry: {decision['entry']:.2f} | TP: {decision['take_profit']:.2f} | SL: {decision['stop_loss']:.2f}. "
+                f"Risk/Reward {rr}:1 with {confidence:.0f}% confidence ({quality} quality). "
+                f"Trail your stop by {trailing:.2f} as price drops. "
+                f"Scale out at key support levels."
+            )
+        elif direction == "EXIT":
+            return (
+                f"EXIT SIGNAL on {symbol} at {price:.2f}. "
+                f"Momentum divergence detected - the current trend is losing steam. "
+                f"Close open positions and move to sidelines. "
+                f"Wait for a fresh setup with better signal alignment before re-entering."
+            )
+        elif direction == "BREAK EVEN":
+            return (
+                f"BREAK-EVEN ZONE on {symbol} at {price:.2f}. "
+                f"Signals are mixed and conflicting. If you have an open position, "
+                f"move your stop loss to break-even to protect capital. "
+                f"No new entries recommended until directional bias strengthens."
             )
         else:
             return (
-                f"{symbol} consolidating around {price}. "
-                f"Mixed signals - waiting for clearer directional bias. "
-                f"Monitor for breakout above/below key levels."
+                f"HOLD/WAIT on {symbol} at {price:.2f}. "
+                f"No clear directional edge right now ({confidence:.0f}% confidence). "
+                f"Stay flat or tighten stops on existing positions. "
+                f"Key levels to watch: above {decision['take_profit']:.2f} for bullish, below {decision['stop_loss']:.2f} for bearish."
             )
 
     def shutdown(self):
