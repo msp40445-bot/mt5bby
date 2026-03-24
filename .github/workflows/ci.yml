@@ -1,0 +1,109 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend-lint-test:
+    name: Backend Lint & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Check imports
+        run: poetry run python -c "from app.main import app; print('Backend imports OK')"
+
+      - name: Run backend smoke test
+        run: |
+          poetry run python -c "
+          from app.price_feed import PriceFeed
+          from app.signals import compute_full_analysis
+          feed = PriceFeed()
+          result = compute_full_analysis(feed)
+          assert 'master_signal' in result
+          assert 'timeframe_signals' in result
+          assert len(result['timeframe_signals']) == 8
+          assert 'oscillators' in result
+          assert 'moving_averages' in result
+          assert 'pivots' in result
+          print('All backend tests passed!')
+          "
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -b --noEmit
+
+      - name: Build
+        run: npm run build
+
+  integration:
+    name: Integration Check
+    runs-on: ubuntu-latest
+    needs: [backend-lint-test, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install backend deps
+        run: cd backend && poetry install --no-interaction
+
+      - name: Start backend
+        run: |
+          cd backend && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+
+      - name: Health check
+        run: curl -f http://localhost:8000/healthz
+
+      - name: API analysis check
+        run: |
+          curl -sf http://localhost:8000/api/analysis | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data['master_signal']['action'] in ['STRONG BUY', 'BUY', 'NEUTRAL', 'SELL', 'STRONG SELL']
+          assert len(data['timeframe_signals']) == 8
+          print('Integration test passed!')
+          "
