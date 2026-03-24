@@ -5,7 +5,11 @@ import { IndicatorTable } from './components/IndicatorTable';
 import { PivotTable } from './components/PivotTable';
 import { SignalPanel } from './components/SignalPanel';
 import { Watchlist } from './components/Watchlist';
-import { BarChart3, Zap } from 'lucide-react';
+import { AIDecisionPanel } from './components/AIDecisionPanel';
+import { AdvancedAnalysisPanel } from './components/AdvancedAnalysisPanel';
+import { StatsPanel } from './components/StatsPanel';
+import { PnLSimulator } from './components/PnLSimulator';
+import { BarChart3, Zap, Brain, Activity } from 'lucide-react';
 
 function LoadingScreen() {
   return (
@@ -26,6 +30,8 @@ function App() {
     return <LoadingScreen />;
   }
 
+  const feedSource = data.feed_source || 'simulation';
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200">
       {/* Header */}
@@ -42,8 +48,18 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <Zap className={`w-3.5 h-3.5 ${connected ? 'text-green-400' : 'text-red-400'}`} />
-            <span className={`text-xs font-medium ${connected ? 'text-green-400' : 'text-red-400'}`}>
+            <Brain className="w-3.5 h-3.5 text-purple-400" />
+            <span className="text-xs font-medium text-purple-400">AI</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Activity className={feedSource === 'tradingview' ? 'w-3.5 h-3.5 text-blue-400' : 'w-3.5 h-3.5 text-amber-400'} />
+            <span className={feedSource === 'tradingview' ? 'text-xs font-medium text-blue-400' : 'text-xs font-medium text-amber-400'}>
+              {feedSource === 'tradingview' ? 'TradingView' : 'Sim'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Zap className={connected ? 'w-3.5 h-3.5 text-green-400' : 'w-3.5 h-3.5 text-red-400'} />
+            <span className={connected ? 'text-xs font-medium text-green-400' : 'text-xs font-medium text-red-400'}>
               {connected ? 'LIVE' : 'OFFLINE'}
             </span>
           </div>
@@ -56,6 +72,19 @@ function App() {
         <main className="flex-1 p-4 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 48px)' }}>
           {/* Price Ticker */}
           <PriceTicker price={data.price} connected={connected} latency={latency} />
+
+          {/* AI Decision Panel + PnL Simulator + Stats */}
+          {data.ai_decision && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-2 space-y-4">
+                <AIDecisionPanel decision={data.ai_decision} feedSource={feedSource} />
+              </div>
+              <div className="space-y-4">
+                <PnLSimulator decision={data.ai_decision} price={data.price} />
+                <StatsPanel decision={data.ai_decision} />
+              </div>
+            </div>
+          )}
 
           {/* Gauges Row */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -87,6 +116,17 @@ function App() {
               />
             </div>
           </div>
+
+          {/* Advanced Analysis */}
+          {data.advanced && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Activity className="w-4 h-4 text-purple-400" />
+                <h2 className="text-sm font-bold text-slate-200">Advanced Analysis</h2>
+              </div>
+              <AdvancedAnalysisPanel advanced={data.advanced} currentPrice={data.price.price} />
+            </div>
+          )}
 
           {/* Multi-Timeframe Signal Panel */}
           <SignalPanel
