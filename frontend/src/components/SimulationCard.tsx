@@ -21,7 +21,7 @@ export function SimulationCard({ simulation, currentPrice, onForceClose }: Props
   return (
     <div className="bg-slate-800/50 rounded border border-slate-700/50">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-700/30">
-        <span className="text-xs font-bold text-slate-300">SIMULATION</span>
+        <span className="text-xs font-bold text-slate-300">SIM <span className="text-amber-400 font-mono">{currentPrice.toFixed(2)}</span></span>
         <div className="flex items-center gap-2">
           <span className={`text-xs font-mono ${stats.total_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             P&L: ${stats.total_pnl.toFixed(2)}
