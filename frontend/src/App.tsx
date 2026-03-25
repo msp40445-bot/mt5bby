@@ -52,9 +52,9 @@ function App() {
             <span className="text-xs font-medium text-purple-400">AI</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Activity className={feedSource === 'tradingview' ? 'w-3.5 h-3.5 text-blue-400' : 'w-3.5 h-3.5 text-amber-400'} />
-            <span className={feedSource === 'tradingview' ? 'text-xs font-medium text-blue-400' : 'text-xs font-medium text-amber-400'}>
-              {feedSource === 'tradingview' ? 'TradingView' : 'Sim'}
+            <Activity className={feedSource === 'tradingview' ? 'w-3.5 h-3.5 text-blue-400' : feedSource === 'api_calibrated' ? 'w-3.5 h-3.5 text-green-400' : 'w-3.5 h-3.5 text-amber-400'} />
+            <span className={feedSource === 'tradingview' ? 'text-xs font-medium text-blue-400' : feedSource === 'api_calibrated' ? 'text-xs font-medium text-green-400' : 'text-xs font-medium text-amber-400'}>
+              {feedSource === 'tradingview' ? 'TradingView' : feedSource === 'api_calibrated' ? 'API Live' : 'SIM'}
             </span>
           </div>
           <div className="flex items-center gap-1.5">

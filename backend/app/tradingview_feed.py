@@ -58,9 +58,14 @@ class TradingViewFeed:
     """Connects to TradingView's WebSocket for real-time price data."""
 
     TV_WS_URL = "wss://data.tradingview.com/socket.io/websocket"
+    TV_WS_URLS = [
+        "wss://data.tradingview.com/socket.io/websocket",
+        "wss://widgetdata.tradingview.com/socket.io/websocket",
+        "wss://prodata.tradingview.com/socket.io/websocket",
+    ]
     TV_HEADERS = {
         "Origin": "https://www.tradingview.com",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
 
     # Map our symbols to TradingView symbols
@@ -126,21 +131,30 @@ class TradingViewFeed:
         self._task = asyncio.create_task(self._run())
 
     async def _run(self):
-        """Main WebSocket loop with auto-reconnect."""
+        """Main WebSocket loop with auto-reconnect, tries multiple endpoints."""
+        url_index = 0
+        retry_delay = 3
         while True:
             try:
-                await self._connect_and_listen()
+                ws_url = self.TV_WS_URLS[url_index % len(self.TV_WS_URLS)]
+                logger.info(f"Trying TradingView WebSocket: {ws_url}")
+                await self._connect_and_listen(ws_url)
+                retry_delay = 3  # Reset on successful connection
             except Exception as e:
-                logger.warning(f"TradingView feed error: {e}")
+                logger.warning(f"TradingView feed error on {ws_url}: {e}")
                 self._connected = False
-            await asyncio.sleep(3)
+                url_index += 1  # Try next URL on failure
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 1.5, 30)  # Backoff up to 30s
 
-    async def _connect_and_listen(self):
+    async def _connect_and_listen(self, ws_url: str = ""):
         """Connect to TradingView and listen for price updates."""
+        if not ws_url:
+            ws_url = self.TV_WS_URL
         self._session = aiohttp.ClientSession()
         try:
             self._ws = await self._session.ws_connect(
-                self.TV_WS_URL,
+                ws_url,
                 headers=self.TV_HEADERS,
                 timeout=aiohttp.ClientWSTimeout(ws_close=10, ws_receive=30),
             )
