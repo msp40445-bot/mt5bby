@@ -135,6 +135,53 @@ export interface AdvancedAnalysis {
   trend_strength?: TrendStrength;
 }
 
+export interface SimTrade {
+  id: number;
+  direction: string;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  close_price: number | null;
+  close_reason: string | null;
+  status: string;
+  pnl: number;
+  pnl_pct: number;
+  max_favorable: number;
+  max_adverse: number;
+  break_even_hit: boolean;
+  trailing_stop: number | null;
+  signal_quality: string;
+  confidence: number;
+  duration_seconds: number;
+  open_time: number;
+  close_time: number | null;
+}
+
+export interface SimStats {
+  total_pnl: number;
+  total_trades: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number;
+  max_drawdown: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+}
+
+export interface SimulationState {
+  current_trade: SimTrade | null;
+  history: SimTrade[];
+  stats: SimStats;
+}
+
+export interface BackendLog {
+  timestamp: number;
+  level: string;
+  logger: string;
+  message: string;
+}
+
 export interface AnalysisData {
   price: PriceData;
   oscillators: IndicatorValue[];
@@ -147,7 +194,9 @@ export interface AnalysisData {
   master_signal: MasterSignal;
   advanced?: AdvancedAnalysis;
   ai_decision?: AIDecision;
+  simulation?: SimulationState;
   feed_source?: string;
+  backend_logs?: BackendLog[];
   timestamp: number;
 }
 
@@ -157,9 +206,25 @@ export function useWebSocket() {
   const [data, setData] = useState<AnalysisData | null>(null);
   const [connected, setConnected] = useState(false);
   const [latency, setLatency] = useState(0);
+  const [chatMessages, setChatMessages] = useState<Array<{role: string; message: string; timestamp: number}>>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const lastUpdateRef = useRef<number>(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendMessage = useCallback((msg: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  }, []);
+
+  const sendChat = useCallback((message: string) => {
+    setChatMessages(prev => [...prev, { role: 'user', message, timestamp: Date.now() / 1000 }]);
+    sendMessage({ type: 'chat', message });
+  }, [sendMessage]);
+
+  const forceClose = useCallback(() => {
+    sendMessage({ type: 'force_close' });
+  }, [sendMessage]);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -179,6 +244,14 @@ export function useWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'full_analysis' || msg.type === 'update') {
         setData(msg.data);
+      } else if (msg.type === 'chat_response') {
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          message: msg.data.response,
+          timestamp: Date.now() / 1000,
+        }]);
+      } else if (msg.type === 'simulation_update') {
+        setData(prev => prev ? { ...prev, simulation: msg.data } : prev);
       }
     };
 
@@ -200,5 +273,5 @@ export function useWebSocket() {
     };
   }, [connect]);
 
-  return { data, connected, latency };
+  return { data, connected, latency, sendChat, forceClose, chatMessages, sendMessage };
 }
