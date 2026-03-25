@@ -9,9 +9,10 @@ from app.indicators import (
     classify_adx, classify_ao, classify_momentum, classify_macd,
     classify_williams, classify_bbp, classify_uo, classify_stoch_rsi,
 )
+from app.advanced_analysis import compute_advanced_analysis
 
 
-def compute_oscillators(feed: PriceFeed, timeframe: str = "1m") -> list[dict]:
+def compute_oscillators(feed, timeframe: str = "1m") -> list[dict]:
     """Compute all oscillator indicators for a given timeframe."""
     closes = feed.get_closes(timeframe)
     highs = feed.get_highs(timeframe)
@@ -66,7 +67,7 @@ def compute_oscillators(feed: PriceFeed, timeframe: str = "1m") -> list[dict]:
     return results
 
 
-def compute_moving_averages(feed: PriceFeed, timeframe: str = "1m") -> list[dict]:
+def compute_moving_averages(feed, timeframe: str = "1m") -> list[dict]:
     """Compute all moving average indicators for a given timeframe."""
     closes = feed.get_closes(timeframe)
     highs = feed.get_highs(timeframe)
@@ -147,7 +148,7 @@ def compute_summary(indicators: list[dict]) -> dict:
     return {"sell": sell, "neutral": neutral, "buy": buy, "signal": signal}
 
 
-def compute_timeframe_signal(feed: PriceFeed, timeframe: str) -> dict:
+def compute_timeframe_signal(feed, timeframe: str) -> dict:
     """Compute signal for a specific timeframe."""
     oscillators = compute_oscillators(feed, timeframe)
     mas = compute_moving_averages(feed, timeframe)
@@ -250,9 +251,10 @@ def compute_master_signal(timeframe_signals: list[dict]) -> dict:
     }
 
 
-def compute_full_analysis(feed: PriceFeed) -> dict:
+def compute_full_analysis(feed) -> dict:
     """Compute complete technical analysis across all timeframes."""
     import time
+    import numpy as np
 
     # Get current price data
     tick = feed.tick()
@@ -283,6 +285,21 @@ def compute_full_analysis(feed: PriceFeed) -> dict:
     # Master signal
     master = compute_master_signal(tf_signals)
 
+    # Advanced analysis
+    closes = feed.get_closes("1m")
+    highs = feed.get_highs("1m")
+    lows = feed.get_lows("1m")
+    volumes = feed.get_volumes("1m")
+
+    # Get opens if available
+    candles_1m = feed.get_candles("1m")
+    if candles_1m:
+        opens = np.array([c.get("open", c["close"]) for c in candles_1m])
+    else:
+        opens = closes.copy()
+
+    advanced = compute_advanced_analysis(closes, highs, lows, volumes, opens)
+
     return {
         "symbol": feed.symbol,
         "price": tick,
@@ -294,5 +311,6 @@ def compute_full_analysis(feed: PriceFeed) -> dict:
         "overall_summary": overall,
         "timeframe_signals": tf_signals,
         "master_signal": master,
+        "advanced": advanced,
         "timestamp": time.time(),
     }

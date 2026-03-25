@@ -12,6 +12,7 @@ export interface PriceData {
   change_pct: number;
   volume: number;
   timestamp: number;
+  source?: string;
 }
 
 export interface IndicatorValue {
@@ -55,6 +56,132 @@ export interface MasterSignal {
   total_neutral: number;
 }
 
+export interface AIDecision {
+  direction: string;
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  risk_reward: number;
+  sim_profit: number;
+  sim_loss: number;
+  confidence: number;
+  quality: string;
+  quality_color: string;
+  strength: number;
+  reasons: string[];
+  action_advice: string;
+  trailing_stop: number;
+  break_even_zone: boolean;
+  momentum_divergence: boolean;
+  bb_position: string;
+  bb_squeeze: boolean;
+  commentary: string;
+  timestamp: number;
+  ai_powered: boolean;
+}
+
+export interface BollingerBands {
+  upper: number;
+  middle: number;
+  lower: number;
+  width: number;
+  percent_b: number;
+}
+
+export interface MarketStructure {
+  trend: string;
+  higher_highs: number;
+  lower_highs: number;
+  higher_lows: number;
+  lower_lows: number;
+  strength: number;
+}
+
+export interface Pattern {
+  name: string;
+  bias: string;
+  strength: number;
+}
+
+export interface TrendStrength {
+  strength: number;
+  direction: string;
+  slope: number;
+  ma_alignment: string;
+  description: string;
+}
+
+export interface FibonacciData {
+  swing_high: number;
+  swing_low: number;
+  levels: Record<string, number>;
+}
+
+export interface VolumeProfile {
+  poc: number;
+  value_area_high: number;
+  value_area_low: number;
+}
+
+export interface AdvancedAnalysis {
+  bollinger_bands?: BollingerBands;
+  atr?: { value: number; period: number };
+  obv?: { value: number; trend: string };
+  vwap?: { value: number; deviation: number; deviation_pct: number; signal: string };
+  fibonacci?: FibonacciData;
+  market_structure?: MarketStructure;
+  patterns?: Pattern[];
+  volume_profile?: VolumeProfile;
+  trend_strength?: TrendStrength;
+}
+
+export interface SimTrade {
+  id: number;
+  direction: string;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  close_price: number | null;
+  close_reason: string | null;
+  status: string;
+  pnl: number;
+  pnl_pct: number;
+  max_favorable: number;
+  max_adverse: number;
+  break_even_hit: boolean;
+  trailing_stop: number | null;
+  signal_quality: string;
+  confidence: number;
+  duration_seconds: number;
+  open_time: number;
+  close_time: number | null;
+}
+
+export interface SimStats {
+  total_pnl: number;
+  total_trades: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number;
+  max_drawdown: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+}
+
+export interface SimulationState {
+  current_trade: SimTrade | null;
+  history: SimTrade[];
+  stats: SimStats;
+}
+
+export interface BackendLog {
+  timestamp: number;
+  level: string;
+  logger: string;
+  message: string;
+}
+
 export interface AnalysisData {
   price: PriceData;
   oscillators: IndicatorValue[];
@@ -65,6 +192,11 @@ export interface AnalysisData {
   overall_summary: GaugeSummary;
   timeframe_signals: TimeframeSignal[];
   master_signal: MasterSignal;
+  advanced?: AdvancedAnalysis;
+  ai_decision?: AIDecision;
+  simulation?: SimulationState;
+  feed_source?: string;
+  backend_logs?: BackendLog[];
   timestamp: number;
 }
 
@@ -74,9 +206,25 @@ export function useWebSocket() {
   const [data, setData] = useState<AnalysisData | null>(null);
   const [connected, setConnected] = useState(false);
   const [latency, setLatency] = useState(0);
+  const [chatMessages, setChatMessages] = useState<Array<{role: string; message: string; timestamp: number}>>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const lastUpdateRef = useRef<number>(Date.now());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendMessage = useCallback((msg: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(msg));
+    }
+  }, []);
+
+  const sendChat = useCallback((message: string) => {
+    setChatMessages(prev => [...prev, { role: 'user', message, timestamp: Date.now() / 1000 }]);
+    sendMessage({ type: 'chat', message });
+  }, [sendMessage]);
+
+  const forceClose = useCallback(() => {
+    sendMessage({ type: 'force_close' });
+  }, [sendMessage]);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -96,6 +244,14 @@ export function useWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'full_analysis' || msg.type === 'update') {
         setData(msg.data);
+      } else if (msg.type === 'chat_response') {
+        setChatMessages(prev => [...prev, {
+          role: 'assistant',
+          message: msg.data.response,
+          timestamp: Date.now() / 1000,
+        }]);
+      } else if (msg.type === 'simulation_update') {
+        setData(prev => prev ? { ...prev, simulation: msg.data } : prev);
       }
     };
 
@@ -117,5 +273,5 @@ export function useWebSocket() {
     };
   }, [connect]);
 
-  return { data, connected, latency };
+  return { data, connected, latency, sendChat, forceClose, chatMessages, sendMessage };
 }
